@@ -3,7 +3,7 @@
 DiffBreak is a small Go HTTP service that inspects GitHub releases/commits between two tags and asks a local Ollama model to return a structured risk analysis. It exposes:
 
 - `GET /detect` to list tags for a repository
-- `POST /api/analyze` to generate upgrade risk analysis
+- `POST /analyze` to generate upgrade risk analysis
 - `GET /metrics` for Prometheus metrics
 
 ## Requirements
@@ -55,7 +55,7 @@ Response:
 }
 ```
 
-### `POST /api/analyze`
+### `POST /analyze`
 
 Request body:
 
@@ -143,4 +143,4 @@ docker run --add-host=host.docker.internal:host-gateway --rm -p 8080:8080 diffbr
 
 - `mode=fast` uses release notes and commit titles.
 - `mode=deep` also includes changed file paths and commit shas in titles.
-- The server enforces a 60s request timeout for `/api/analyze` and returns `504` with JSON error on timeout.
+- The server enforces a 60s request timeout for `/analyze` and returns `504` with JSON error on timeout.

@@ -14,7 +14,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// AnalyzeHandler handles POST /api/analyze requests.
+// AnalyzeHandler handles POST /analyze requests.
 func AnalyzeHandler(gh *github.Client, ollamaBaseURL string, logger *zap.Logger) http.HandlerFunc {
 	if logger == nil {
 		logger = zap.NewNop()

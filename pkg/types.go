@@ -18,7 +18,7 @@ type DetectResponse struct {
 	DefaultTo   string   `json:"defaultTo,omitempty"`
 }
 
-// AnalyzeRequest is the input payload expected by the /api/analyze endpoint.
+// AnalyzeRequest is the input payload expected by the /analyze endpoint.
 type AnalyzeRequest struct {
 	RepoUrl string `json:"repoUrl"`
 	FromTag string `json:"fromTag"`
@@ -29,7 +29,7 @@ type AnalyzeRequest struct {
 	} `json:"limits"`
 }
 
-// AnalyzeResponse is the structured analysis result returned by /api/analyze.
+// AnalyzeResponse is the structured analysis result returned by /analyze.
 type AnalyzeResponse struct {
 	Risk            RiskInfo         `json:"risk"`
 	Summary         SummaryInfo      `json:"summary"`

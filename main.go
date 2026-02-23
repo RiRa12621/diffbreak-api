@@ -41,7 +41,7 @@ func main() {
 	http.Handle("/metrics", metricsHandler)
 	// Public API endpoints for repo detection and upgrade analysis.
 	http.Handle("/detect", pkg.WrapHandler("detect", pkg.DetectHandler(client, logger), logger))
-	http.Handle("/api/analyze", pkg.WrapHandler("analyze", pkg.AnalyzeHandler(client, *llmPtr, logger), logger))
+	http.Handle("/analyze", pkg.WrapHandler("analyze", pkg.AnalyzeHandler(client, *llmPtr, logger), logger))
 	err := http.ListenAndServe(*ifacePtr+":"+*portPtr, nil)
 	if err != nil {
 		logger.Fatal("starting http server", zap.Error(err))

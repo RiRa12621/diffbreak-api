@@ -24,7 +24,7 @@ type ollamaRequest struct {
 func TestAnalyzeHandlerInvalidBody(t *testing.T) {
 	handler := AnalyzeHandler(nil, "http://localhost:11434", zap.NewNop())
 
-	req := httptest.NewRequest(http.MethodPost, "/api/analyze", strings.NewReader("{"))
+	req := httptest.NewRequest(http.MethodPost, "/analyze", strings.NewReader("{"))
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -40,7 +40,7 @@ func TestAnalyzeHandlerInvalidRepoURL(t *testing.T) {
 	handler := AnalyzeHandler(nil, "http://localhost:11434", zap.NewNop())
 
 	body := `{"repoUrl":"github.com/octo/hello","fromTag":"v1","toTag":"v2","mode":"fast","limits":{"maxReleases":10}}`
-	req := httptest.NewRequest(http.MethodPost, "/api/analyze", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/analyze", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -56,7 +56,7 @@ func TestAnalyzeHandlerInvalidMode(t *testing.T) {
 	handler := AnalyzeHandler(nil, "http://localhost:11434", zap.NewNop())
 
 	body := `{"repoUrl":"https://github.com/octo/hello","fromTag":"v1","toTag":"v2","mode":"slow","limits":{"maxReleases":10}}`
-	req := httptest.NewRequest(http.MethodPost, "/api/analyze", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/analyze", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -72,7 +72,7 @@ func TestAnalyzeHandlerMissingTags(t *testing.T) {
 	handler := AnalyzeHandler(nil, "http://localhost:11434", zap.NewNop())
 
 	body := `{"repoUrl":"https://github.com/octo/hello","fromTag":"","toTag":"v2","mode":"fast","limits":{"maxReleases":10}}`
-	req := httptest.NewRequest(http.MethodPost, "/api/analyze", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/analyze", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -140,7 +140,7 @@ func TestAnalyzeHandlerHappyPath(t *testing.T) {
 	handler := AnalyzeHandler(ghClient, ollama.URL, zap.NewNop())
 
 	body := `{"repoUrl":"https://github.com/octo/hello","fromTag":"v1.0.0","toTag":"v1.1.0","mode":"deep","limits":{"maxReleases":10}}`
-	req := httptest.NewRequest(http.MethodPost, "/api/analyze", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/analyze", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
