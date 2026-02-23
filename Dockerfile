@@ -6,19 +6,26 @@ WORKDIR /src
 
 RUN apk add --no-cache ca-certificates git
 
+ARG TARGETOS
+ARG TARGETARCH
+ENV GOOS=${TARGETOS:-linux}
+ENV GOARCH=${TARGETARCH:-amd64}
+
 COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . ./
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/diffbreak ./
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/diffbreak ./
 
-FROM gcr.io/distroless/base-debian12
+FROM alpine:3.20
 
 WORKDIR /
+
+RUN apk add --no-cache ca-certificates
+
 COPY --from=builder /out/diffbreak /diffbreak
 
 EXPOSE 8080
-USER nonroot:nonroot
 
 ENTRYPOINT ["/diffbreak"]

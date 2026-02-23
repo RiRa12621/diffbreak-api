@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/google/go-github/v62/github"
+	"github.com/google/go-github/v83/github"
 	"go.uber.org/zap"
 )
 

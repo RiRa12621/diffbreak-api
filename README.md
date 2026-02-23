@@ -109,12 +109,18 @@ Prometheus metrics are exposed at `GET /metrics`:
 
 ## Docker
 
-A multi-stage Dockerfile is provided.
+A multi-stage Dockerfile is provided, with Alpine as the runtime image.
 
 Build:
 
 ```bash
 docker build -t diffbreak .
+```
+
+Multi-arch build with buildx:
+
+```bash
+docker buildx build --platform linux/amd64,linux/arm64 -t diffbreak .
 ```
 
 Run:

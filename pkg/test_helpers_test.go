@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/google/go-github/v62/github"
+	"github.com/google/go-github/v83/github"
 )
 
 func newGitHubTestClient(t *testing.T, handler http.Handler) *github.Client {

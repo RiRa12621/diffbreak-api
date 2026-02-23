@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/go-github/v62/github"
+	"github.com/google/go-github/v83/github"
 )
 
 // fetchComparisonData collects release notes, commit titles, and changed files between two tags.
