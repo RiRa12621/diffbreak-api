@@ -26,6 +26,13 @@ func DetectHandler(gh *github.Client, logger *zap.Logger) http.HandlerFunc {
 			return
 		}
 
+		owner, repo, err := ParseGitHubRepoURL(repoURL)
+		if err != nil {
+			log.Warn("invalid repoUrl", zap.String("repo_url", repoURL))
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid repoUrl"})
+			return
+		}
+
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
 
@@ -49,6 +56,8 @@ func DetectHandler(gh *github.Client, logger *zap.Logger) http.HandlerFunc {
 		resp := DetectResponse{
 			Repo: RepoInfo{
 				Url:      repoURL,
+				Owner:    owner,
+				Name:     repo,
 				Provider: "github",
 			},
 			Tags: tags,

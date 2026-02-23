@@ -31,8 +31,8 @@ func TestDetectHandlerInvalidRepo(t *testing.T) {
 
 	handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("expected status %d, got %d", http.StatusInternalServerError, rec.Code)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
 	}
 }
 
@@ -81,6 +81,12 @@ func TestDetectHandlerSuccess(t *testing.T) {
 
 	if resp.Repo.Url != "https://github.com/octo/hello" {
 		t.Fatalf("unexpected repo url: %s", resp.Repo.Url)
+	}
+	if resp.Repo.Owner != "octo" {
+		t.Fatalf("unexpected repo owner: %s", resp.Repo.Owner)
+	}
+	if resp.Repo.Name != "hello" {
+		t.Fatalf("unexpected repo name: %s", resp.Repo.Name)
 	}
 	if resp.Repo.Provider != "github" {
 		t.Fatalf("unexpected provider: %s", resp.Repo.Provider)
