@@ -28,7 +28,7 @@ func AnalyzeHandler(gh *github.Client, ollamaBaseURL string, logger *zap.Logger)
 			return
 		}
 
-		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+		ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
 		defer cancel()
 
 		var req AnalyzeRequest

@@ -143,4 +143,4 @@ docker run --add-host=host.docker.internal:host-gateway --rm -p 8080:8080 diffbr
 
 - `mode=fast` uses release notes and commit titles.
 - `mode=deep` also includes changed file paths and commit shas in titles.
-- The server enforces a 60s request timeout for `/analyze` and returns `504` with JSON error on timeout.
+- The server enforces a 120s request timeout for `/analyze` and returns `504` with JSON error on timeout.

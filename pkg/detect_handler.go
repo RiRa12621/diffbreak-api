@@ -33,7 +33,7 @@ func DetectHandler(gh *github.Client, logger *zap.Logger) http.HandlerFunc {
 			return
 		}
 
-		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 		defer cancel()
 
 		tags, err := GetRepoTags(ctx, gh, repoURL)
