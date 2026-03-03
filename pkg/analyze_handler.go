@@ -198,7 +198,7 @@ func buildAnalysisPrompt(bundle analysisInputBundle) (string, error) {
 	}
 
 	prompt := fmt.Sprintf(
-		"You are a release risk analyst.\nOutput MUST be a single JSON object with EXACTLY these top-level keys: risk, summary, breakers, behaviorChanges, upgradeSteps, evidence, meta. Do not add extra keys.\nTypes:\n- risk MUST be an object, not a string: {\"level\":\"low|medium|high\",\"score\":0-100,\"confidence\":\"low|medium|high\",\"reasons\":[...]}\n- summary MUST be an object: {\"highlights\":[...],\"grouped\":[{\"title\":\"...\",\"items\":[...]}]}\n- breakers / behaviorChanges / upgradeSteps / evidence MUST be arrays (can be empty).\n- meta MUST be an object.\nNo markdown, no code fences, no commentary. Output must start with { and end with }. No trailing commas. Use double quotes only.\nInput:\n%s",
+		"You are a release risk analyst.\nOutput MUST be a single JSON object with EXACTLY these top-level keys: risk, summary, breakers, behaviorChanges, upgradeSteps, evidence, meta. Do not add extra keys.\nTypes:\n- risk MUST be an object, not a string: {\"level\":\"low|medium|high\",\"score\":0-100,\"confidence\":\"low|medium|high\",\"reasons\":[...]}\n- summary MUST be an object: {\"highlights\":[...],\"grouped\":[{\"title\":\"...\",\"items\":[...]}]}\n- breakers / behaviorChanges / upgradeSteps / evidence MUST be arrays (can be empty, items are objects).\n- meta MUST be an object.\nNo markdown, no code fences, no commentary. Output must start with { and end with }. No trailing commas. Use double quotes only.\nInput:\n%s",
 		string(payload),
 	)
 	return prompt, nil
@@ -315,24 +315,47 @@ func validateResponseShape(obj map[string]json.RawMessage) error {
 		}
 	}
 
-	if !isJSONObject(obj["risk"]) {
+	var risk map[string]json.RawMessage
+	if err := json.Unmarshal(obj["risk"], &risk); err != nil {
 		return errors.New("risk must be object")
 	}
-	if !isJSONObject(obj["summary"]) {
+	if reasons, ok := risk["reasons"]; ok && !isJSONArray(reasons) {
+		return errors.New("risk.reasons must be array")
+	}
+
+	var summary map[string]json.RawMessage
+	if err := json.Unmarshal(obj["summary"], &summary); err != nil {
 		return errors.New("summary must be object")
 	}
-	if !isJSONArray(obj["breakers"]) {
-		return errors.New("breakers must be array")
+	if grouped, ok := summary["grouped"]; ok {
+		var groupedItems []json.RawMessage
+		if err := json.Unmarshal(grouped, &groupedItems); err != nil {
+			return errors.New("summary.grouped must be array")
+		}
+		for _, item := range groupedItems {
+			var groupedObj map[string]json.RawMessage
+			if err := json.Unmarshal(item, &groupedObj); err != nil {
+				return errors.New("summary.grouped items must be objects")
+			}
+			if items, ok := groupedObj["items"]; ok && !isJSONArray(items) {
+				return errors.New("summary.grouped.items must be array")
+			}
+		}
 	}
-	if !isJSONArray(obj["behaviorChanges"]) {
-		return errors.New("behaviorChanges must be array")
+
+	if err := validateArrayOfObjects(obj["breakers"], "breakers", "evidence"); err != nil {
+		return err
 	}
-	if !isJSONArray(obj["upgradeSteps"]) {
-		return errors.New("upgradeSteps must be array")
+	if err := validateArrayOfObjects(obj["behaviorChanges"], "behaviorChanges", "evidence"); err != nil {
+		return err
 	}
-	if !isJSONArray(obj["evidence"]) {
-		return errors.New("evidence must be array")
+	if err := validateArrayOfObjects(obj["upgradeSteps"], "upgradeSteps", "evidence"); err != nil {
+		return err
 	}
+	if err := validateArrayOfObjects(obj["evidence"], "evidence", ""); err != nil {
+		return err
+	}
+
 	if !isJSONObject(obj["meta"]) {
 		return errors.New("meta must be object")
 	}
@@ -359,12 +382,32 @@ func firstNonSpaceByte(value []byte) byte {
 	return 0
 }
 
+func validateArrayOfObjects(raw json.RawMessage, name, nestedArrayKey string) error {
+	var items []json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return fmt.Errorf("%s must be array", name)
+	}
+	for _, item := range items {
+		var obj map[string]json.RawMessage
+		if err := json.Unmarshal(item, &obj); err != nil {
+			return fmt.Errorf("%s items must be objects", name)
+		}
+		if nestedArrayKey == "" {
+			continue
+		}
+		if nested, ok := obj[nestedArrayKey]; ok && !isJSONArray(nested) {
+			return fmt.Errorf("%s.%s must be array", name, nestedArrayKey)
+		}
+	}
+	return nil
+}
+
 func buildRepairPrompt(raw []byte) (string, error) {
 	if len(raw) == 0 {
 		return "", errors.New("empty model response")
 	}
 	return fmt.Sprintf(
-		"Rewrite the following into valid JSON with EXACTLY these top-level keys: risk, summary, breakers, behaviorChanges, upgradeSteps, evidence, meta. Do not add extra keys.\nTypes:\n- risk MUST be an object, not a string: {\"level\":\"low|medium|high\",\"score\":0-100,\"confidence\":\"low|medium|high\",\"reasons\":[...]}\n- summary MUST be an object: {\"highlights\":[...],\"grouped\":[{\"title\":\"...\",\"items\":[...]}]}\n- breakers / behaviorChanges / upgradeSteps / evidence MUST be arrays (can be empty).\n- meta MUST be an object.\nNo markdown, no code fences, no commentary. Output must start with { and end with }. No trailing commas. Use double quotes only.\nInvalid JSON:\n%s",
+		"Rewrite the following into valid JSON with EXACTLY these top-level keys: risk, summary, breakers, behaviorChanges, upgradeSteps, evidence, meta. Do not add extra keys.\nTypes:\n- risk MUST be an object, not a string: {\"level\":\"low|medium|high\",\"score\":0-100,\"confidence\":\"low|medium|high\",\"reasons\":[...]}\n- summary MUST be an object: {\"highlights\":[...],\"grouped\":[{\"title\":\"...\",\"items\":[...]}]}\n- breakers / behaviorChanges / upgradeSteps / evidence MUST be arrays (can be empty, items are objects).\n- meta MUST be an object.\nNo markdown, no code fences, no commentary. Output must start with { and end with }. No trailing commas. Use double quotes only.\nInvalid JSON:\n%s",
 		string(raw),
 	), nil
 }
