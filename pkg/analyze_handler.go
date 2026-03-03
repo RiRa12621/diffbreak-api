@@ -108,7 +108,15 @@ func AnalyzeHandler(gh *github.Client, ollamaBaseURL string, logger *zap.Logger)
 			return
 		}
 
-		modelPayload, err := callOllama(ctx, ollamaBaseURL, prompt)
+		model, numPredict := ollamaConfig(req.Mode)
+		log.Info("ollama prompt stats",
+			zap.Int("prompt_bytes", len(prompt)),
+			zap.Int("prompt_tokens_est", len(prompt)/4),
+			zap.String("model", model),
+			zap.Int("num_predict", numPredict),
+		)
+
+		modelPayload, err := callOllama(ctx, ollamaBaseURL, prompt, req.Mode)
 		if err != nil {
 			handleAnalyzeError(w, err, ctx, log)
 			return
@@ -167,19 +175,8 @@ func buildAnalysisPrompt(bundle analysisInputBundle) (string, error) {
 		return "", err
 	}
 
-	schema := `{
-  "risk": { "level": "low|medium|high", "score": 0-100, "confidence": "low|medium|high", "reasons": ["..."] },
-  "summary": { "highlights": ["..."], "grouped": [ { "title": "...", "items": ["..."] } ] },
-  "breakers": [ { "title": "...", "severity": "low|medium|high", "reason": "...", "evidence": [ { "label": "...", "url": "..." } ] } ],
-  "behaviorChanges": [ { "title": "...", "reason": "...", "evidence": [ { "label": "...", "url": "..." } ] } ],
-  "upgradeSteps": [ { "step": "...", "why": "...", "evidence": [ { "label": "...", "url": "..." } ] } ],
-  "evidence": [ { "label": "...", "url": "...", "kind": "release|pr|compare|commit" } ],
-  "meta": { "repo": { "url": "..." }, "fromTag": "...", "toTag": "...", "generatedAt": "RFC3339 timestamp" }
-}`
-
 	prompt := fmt.Sprintf(
-		"You are a release risk analyst. Return ONLY valid JSON matching this schema exactly, with no extra keys and no markdown.\nSchema:\n%s\nInput:\n%s",
-		schema,
+		"You are a release risk analyst.\nReturn a single JSON object with keys: risk, summary, breakers, behaviorChanges, upgradeSteps, evidence, meta.\nNo markdown, no code fences, no commentary.\nOutput must start with { and end with }.\nNo trailing commas.\nUse double quotes only.\nInput:\n%s",
 		string(payload),
 	)
 	return prompt, nil
@@ -194,7 +191,15 @@ func validateAndNormalizeResponse(raw []byte) (AnalyzeResponse, error) {
 
 	var resp AnalyzeResponse
 	if err := json.Unmarshal(raw, &resp); err != nil {
-		return AnalyzeResponse{}, err
+		text := string(raw)
+		start := strings.IndexByte(text, '{')
+		end := strings.LastIndexByte(text, '}')
+		if start == -1 || end == -1 || end <= start {
+			return AnalyzeResponse{}, err
+		}
+		if err := json.Unmarshal([]byte(text[start:end+1]), &resp); err != nil {
+			return AnalyzeResponse{}, err
+		}
 	}
 
 	resp.Risk.Score = clampScore(resp.Risk.Score)

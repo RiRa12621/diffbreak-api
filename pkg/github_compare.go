@@ -42,6 +42,17 @@ func fetchComparisonData(ctx context.Context, gh *github.Client, owner, repo, fr
 		commitTitles = append(commitTitles, title)
 	}
 
+	if mode == "fast" {
+		if len(commitTitles) > 150 {
+			commitTitles = commitTitles[:150]
+		}
+		for i, title := range commitTitles {
+			if len(title) > 120 {
+				commitTitles[i] = title[:120]
+			}
+		}
+	}
+
 	var changedFiles []string
 	if mode == "deep" {
 		seen := make(map[string]struct{})
@@ -61,7 +72,7 @@ func fetchComparisonData(ctx context.Context, gh *github.Client, owner, repo, fr
 		}
 	}
 
-	releaseNotes, err := fetchReleaseNotes(ctx, gh, owner, repo, fromTag, toTag, maxReleases)
+	releaseNotes, err := fetchReleaseNotes(ctx, gh, owner, repo, fromTag, toTag, maxReleases, mode)
 	if err != nil {
 		return comparisonData{}, err
 	}
@@ -73,7 +84,7 @@ func fetchComparisonData(ctx context.Context, gh *github.Client, owner, repo, fr
 	}, nil
 }
 
-func fetchReleaseNotes(ctx context.Context, gh *github.Client, owner, repo, fromTag, toTag string, maxReleases int) ([]releaseNote, error) {
+func fetchReleaseNotes(ctx context.Context, gh *github.Client, owner, repo, fromTag, toTag string, maxReleases int, mode string) ([]releaseNote, error) {
 	notes := []releaseNote{}
 	opt := &github.ListOptions{PerPage: 100}
 	collecting := false
@@ -112,8 +123,12 @@ func fetchReleaseNotes(ctx context.Context, gh *github.Client, owner, repo, from
 
 			if collecting {
 				body := rel.GetBody()
-				if len(body) > 5000 {
-					body = body[:5000]
+				limit := 5000
+				if mode == "fast" {
+					limit = 1200
+				}
+				if len(body) > limit {
+					body = body[:limit]
 				}
 				notes = append(notes, releaseNote{Tag: tag, Body: body})
 

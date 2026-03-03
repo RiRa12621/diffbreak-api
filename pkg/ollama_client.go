@@ -12,22 +12,23 @@ import (
 )
 
 // callOllama sends the analysis prompt to Ollama and returns the model response as raw JSON.
-func callOllama(ctx context.Context, baseURL, prompt string) ([]byte, error) {
+func callOllama(ctx context.Context, baseURL, prompt, mode string) ([]byte, error) {
 	start := time.Now()
 	status := "ok"
 	defer func() {
 		observeOllamaRequest(status, time.Since(start))
 	}()
 
+	model, numPredict := ollamaConfig(mode)
 	url := strings.TrimRight(baseURL, "/") + "/api/generate"
 
 	payload := ollamaGenerateRequest{
-		Model:  "qwen2.5:7b",
+		Model:  model,
 		Prompt: prompt,
 		Stream: false,
 		Options: ollamaOptions{
 			Temperature: 0.2,
-			NumPredict:  1200,
+			NumPredict:  numPredict,
 		},
 	}
 
@@ -69,4 +70,11 @@ func callOllama(ctx context.Context, baseURL, prompt string) ([]byte, error) {
 	}
 
 	return []byte(strings.TrimSpace(parsed.Response)), nil
+}
+
+func ollamaConfig(mode string) (string, int) {
+	if mode == "fast" {
+		return "qwen2.5:3b", 600
+	}
+	return "qwen2.5:7b", 1200
 }
