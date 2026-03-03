@@ -122,17 +122,33 @@ func AnalyzeHandler(gh *github.Client, ollamaBaseURL string, logger *zap.Logger)
 			return
 		}
 
-		resp, err := validateAndNormalizeResponse(modelPayload)
+		resp, shapeInvalid, err := validateAndNormalizeResponse(modelPayload)
 		if err != nil {
-			log.Error("invalid model JSON",
-				zap.Error(err),
-				zap.String("model", model),
-				zap.Int("num_predict", numPredict),
-				zap.Int("model_response_len", len(modelPayload)),
-				zap.String("model_response_excerpt", truncateForLog(sanitizeForLog(string(modelPayload)), 400)),
-			)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "model returned invalid JSON"})
-			return
+			logModelParseFailure(log, "initial", err, model, numPredict, modelPayload)
+			if shapeInvalid {
+				repairPrompt, promptErr := buildRepairPrompt(modelPayload)
+				if promptErr != nil {
+					log.Error("failed to build repair prompt", zap.Error(promptErr))
+					writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "model returned invalid JSON"})
+					return
+				}
+
+				repairPayload, repairErr := callOllama(ctx, ollamaBaseURL, repairPrompt, req.Mode)
+				if repairErr != nil {
+					handleAnalyzeError(w, repairErr, ctx, log)
+					return
+				}
+
+				resp, _, err = validateAndNormalizeResponse(repairPayload)
+				if err != nil {
+					logModelParseFailure(log, "repair", err, model, numPredict, repairPayload)
+					writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "model returned invalid JSON"})
+					return
+				}
+			} else {
+				writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "model returned invalid JSON"})
+				return
+			}
 		}
 
 		resp.Meta.Repo.Url = req.RepoUrl
@@ -182,30 +198,32 @@ func buildAnalysisPrompt(bundle analysisInputBundle) (string, error) {
 	}
 
 	prompt := fmt.Sprintf(
-		"You are a release risk analyst.\nReturn a single JSON object with keys: risk, summary, breakers, behaviorChanges, upgradeSteps, evidence, meta.\nNo markdown, no code fences, no commentary.\nOutput must start with { and end with }.\nNo trailing commas.\nUse double quotes only.\nInput:\n%s",
+		"You are a release risk analyst.\nOutput MUST be a single JSON object with EXACTLY these top-level keys: risk, summary, breakers, behaviorChanges, upgradeSteps, evidence, meta. Do not add extra keys.\nTypes:\n- risk MUST be an object, not a string: {\"level\":\"low|medium|high\",\"score\":0-100,\"confidence\":\"low|medium|high\",\"reasons\":[...]}\n- summary MUST be an object: {\"highlights\":[...],\"grouped\":[{\"title\":\"...\",\"items\":[...]}]}\n- breakers / behaviorChanges / upgradeSteps / evidence MUST be arrays (can be empty).\n- meta MUST be an object.\nNo markdown, no code fences, no commentary. Output must start with { and end with }. No trailing commas. Use double quotes only.\nInput:\n%s",
 		string(payload),
 	)
 	return prompt, nil
 }
 
-// validateAndNormalizeResponse validates JSON and normalizes risk level and empty slices.
-func validateAndNormalizeResponse(raw []byte) (AnalyzeResponse, error) {
-	raw = bytes.TrimSpace(raw)
-	if len(raw) == 0 {
-		return AnalyzeResponse{}, errors.New("empty model response")
+// validateAndNormalizeResponse validates JSON shape, then normalizes risk level and empty slices.
+func validateAndNormalizeResponse(raw []byte) (AnalyzeResponse, bool, error) {
+	cleaned := extractJSONObject(raw)
+	cleaned = bytes.TrimSpace(cleaned)
+	if len(cleaned) == 0 {
+		return AnalyzeResponse{}, false, errors.New("empty model response")
+	}
+
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(cleaned, &obj); err != nil {
+		return AnalyzeResponse{}, false, err
+	}
+
+	if err := validateResponseShape(obj); err != nil {
+		return AnalyzeResponse{}, true, err
 	}
 
 	var resp AnalyzeResponse
-	if err := json.Unmarshal(raw, &resp); err != nil {
-		text := string(raw)
-		start := strings.IndexByte(text, '{')
-		end := strings.LastIndexByte(text, '}')
-		if start == -1 || end == -1 || end <= start {
-			return AnalyzeResponse{}, err
-		}
-		if err := json.Unmarshal([]byte(text[start:end+1]), &resp); err != nil {
-			return AnalyzeResponse{}, err
-		}
+	if err := json.Unmarshal(cleaned, &resp); err != nil {
+		return AnalyzeResponse{}, false, err
 	}
 
 	resp.Risk.Score = clampScore(resp.Risk.Score)
@@ -255,7 +273,7 @@ func validateAndNormalizeResponse(raw []byte) (AnalyzeResponse, error) {
 		resp.Evidence = []EvidenceItem{}
 	}
 
-	return resp, nil
+	return resp, false, nil
 }
 
 func clampScore(score int) int {
@@ -279,16 +297,103 @@ func riskLevelForScore(score int) string {
 	}
 }
 
-func truncateForLog(value string, max int) string {
-	if max <= 0 || len(value) <= max {
-		return value
+func extractJSONObject(raw []byte) []byte {
+	text := string(raw)
+	start := strings.IndexByte(text, '{')
+	end := strings.LastIndexByte(text, '}')
+	if start == -1 || end == -1 || end <= start {
+		return raw
 	}
-	return value[:max] + "...(truncated)"
+	return []byte(text[start : end+1])
 }
 
-func sanitizeForLog(value string) string {
-	value = strings.ReplaceAll(value, "\n", "\\n")
-	value = strings.ReplaceAll(value, "\r", "\\r")
-	value = strings.ReplaceAll(value, "\t", "\\t")
-	return value
+func validateResponseShape(obj map[string]json.RawMessage) error {
+	required := []string{"risk", "summary", "breakers", "behaviorChanges", "upgradeSteps", "evidence", "meta"}
+	for _, key := range required {
+		if _, ok := obj[key]; !ok {
+			return fmt.Errorf("missing key %s", key)
+		}
+	}
+
+	if !isJSONObject(obj["risk"]) {
+		return errors.New("risk must be object")
+	}
+	if !isJSONObject(obj["summary"]) {
+		return errors.New("summary must be object")
+	}
+	if !isJSONArray(obj["breakers"]) {
+		return errors.New("breakers must be array")
+	}
+	if !isJSONArray(obj["behaviorChanges"]) {
+		return errors.New("behaviorChanges must be array")
+	}
+	if !isJSONArray(obj["upgradeSteps"]) {
+		return errors.New("upgradeSteps must be array")
+	}
+	if !isJSONArray(obj["evidence"]) {
+		return errors.New("evidence must be array")
+	}
+	if !isJSONObject(obj["meta"]) {
+		return errors.New("meta must be object")
+	}
+	return nil
+}
+
+func isJSONObject(value json.RawMessage) bool {
+	return firstNonSpaceByte(value) == '{'
+}
+
+func isJSONArray(value json.RawMessage) bool {
+	return firstNonSpaceByte(value) == '['
+}
+
+func firstNonSpaceByte(value []byte) byte {
+	for _, b := range value {
+		switch b {
+		case ' ', '\n', '\r', '\t':
+			continue
+		default:
+			return b
+		}
+	}
+	return 0
+}
+
+func buildRepairPrompt(raw []byte) (string, error) {
+	if len(raw) == 0 {
+		return "", errors.New("empty model response")
+	}
+	return fmt.Sprintf(
+		"Rewrite the following into valid JSON with EXACTLY these top-level keys: risk, summary, breakers, behaviorChanges, upgradeSteps, evidence, meta. Do not add extra keys.\nTypes:\n- risk MUST be an object, not a string: {\"level\":\"low|medium|high\",\"score\":0-100,\"confidence\":\"low|medium|high\",\"reasons\":[...]}\n- summary MUST be an object: {\"highlights\":[...],\"grouped\":[{\"title\":\"...\",\"items\":[...]}]}\n- breakers / behaviorChanges / upgradeSteps / evidence MUST be arrays (can be empty).\n- meta MUST be an object.\nNo markdown, no code fences, no commentary. Output must start with { and end with }. No trailing commas. Use double quotes only.\nInvalid JSON:\n%s",
+		string(raw),
+	), nil
+}
+
+func logModelParseFailure(logger *zap.Logger, stage string, err error, model string, numPredict int, payload []byte) {
+	if logger == nil {
+		return
+	}
+	head, tail := headTailSnippet(payload, 300)
+	logger.Error("invalid model JSON",
+		zap.String("stage", stage),
+		zap.Error(err),
+		zap.String("model", model),
+		zap.Int("num_predict", numPredict),
+		zap.Int("model_response_len", len(payload)),
+		zap.String("model_response_head", head),
+		zap.String("model_response_tail", tail),
+	)
+}
+
+func headTailSnippet(payload []byte, max int) (string, string) {
+	if max <= 0 || len(payload) == 0 {
+		return "", ""
+	}
+	if len(payload) <= max {
+		text := string(payload)
+		return text, text
+	}
+	head := string(payload[:max])
+	tail := string(payload[len(payload)-max:])
+	return head, tail
 }

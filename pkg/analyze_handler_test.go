@@ -110,7 +110,9 @@ func TestAnalyzeHandlerHappyPath(t *testing.T) {
 	ghClient := newGitHubTestClient(t, ghMux)
 
 	var gotPrompt string
+	requestCount := 0
 	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
 		var req ollamaRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
@@ -169,6 +171,124 @@ func TestAnalyzeHandlerHappyPath(t *testing.T) {
 	}
 	if resp.Meta.GeneratedAt == "" {
 		t.Fatalf("expected generatedAt to be set")
+	}
+	if requestCount != 1 {
+		t.Fatalf("expected 1 ollama call, got %d", requestCount)
+	}
+}
+
+func TestAnalyzeHandlerRepairsInvalidShape(t *testing.T) {
+	ghMux := http.NewServeMux()
+	ghMux.HandleFunc("/repos/octo/hello/compare/v1.0.0...v1.1.0", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"commits":[],"files":[]}`))
+	})
+	ghMux.HandleFunc("/repos/octo/hello/releases", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[]`))
+	})
+
+	ghClient := newGitHubTestClient(t, ghMux)
+
+	requestCount := 0
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		var req ollamaRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		var modelResp string
+		if requestCount == 1 {
+			modelResp = `{
+				"risk": "low",
+				"summary": {"highlights": [], "grouped": []},
+				"breakers": [],
+				"behaviorChanges": [],
+				"upgradeSteps": [],
+				"evidence": [],
+				"meta": {"repo": {"url": ""}, "fromTag": "", "toTag": "", "generatedAt": ""}
+			}`
+		} else {
+			modelResp = `{
+				"risk": {"level": "low", "score": 10, "confidence": "high", "reasons": []},
+				"summary": {"highlights": [], "grouped": []},
+				"breakers": [],
+				"behaviorChanges": [],
+				"upgradeSteps": [],
+				"evidence": [],
+				"meta": {"repo": {"url": ""}, "fromTag": "", "toTag": "", "generatedAt": ""}
+			}`
+		}
+
+		resp := map[string]any{"response": modelResp, "done": true}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer ollama.Close()
+
+	handler := AnalyzeHandler(ghClient, ollama.URL, zap.NewNop())
+
+	body := `{"repoUrl":"https://github.com/octo/hello","fromTag":"v1.0.0","toTag":"v1.1.0","mode":"fast","limits":{"maxReleases":10}}`
+	req := httptest.NewRequest(http.MethodPost, "/analyze", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+	if requestCount != 2 {
+		t.Fatalf("expected 2 ollama calls (repair), got %d", requestCount)
+	}
+}
+
+func TestAnalyzeHandlerSalvageFencedJSON(t *testing.T) {
+	ghMux := http.NewServeMux()
+	ghMux.HandleFunc("/repos/octo/hello/compare/v1.0.0...v1.1.0", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"commits":[],"files":[]}`))
+	})
+	ghMux.HandleFunc("/repos/octo/hello/releases", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[]`))
+	})
+
+	ghClient := newGitHubTestClient(t, ghMux)
+
+	requestCount := 0
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		modelResp := "Sure, here's the JSON:\\n```json\\n" + `{
+			"risk": {"level": "low", "score": 10, "confidence": "high", "reasons": []},
+			"summary": {"highlights": [], "grouped": []},
+			"breakers": [],
+			"behaviorChanges": [],
+			"upgradeSteps": [],
+			"evidence": [],
+			"meta": {"repo": {"url": ""}, "fromTag": "", "toTag": "", "generatedAt": ""}
+		}` + "\\n```"
+
+		resp := map[string]any{"response": modelResp, "done": true}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer ollama.Close()
+
+	handler := AnalyzeHandler(ghClient, ollama.URL, zap.NewNop())
+
+	body := `{"repoUrl":"https://github.com/octo/hello","fromTag":"v1.0.0","toTag":"v1.1.0","mode":"fast","limits":{"maxReleases":10}}`
+	req := httptest.NewRequest(http.MethodPost, "/analyze", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+	if requestCount != 1 {
+		t.Fatalf("expected 1 ollama call, got %d", requestCount)
 	}
 }
 
