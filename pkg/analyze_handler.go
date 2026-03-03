@@ -124,7 +124,13 @@ func AnalyzeHandler(gh *github.Client, ollamaBaseURL string, logger *zap.Logger)
 
 		resp, err := validateAndNormalizeResponse(modelPayload)
 		if err != nil {
-			log.Error("invalid model JSON", zap.Error(err))
+			log.Error("invalid model JSON",
+				zap.Error(err),
+				zap.String("model", model),
+				zap.Int("num_predict", numPredict),
+				zap.Int("model_response_len", len(modelPayload)),
+				zap.String("model_response_excerpt", truncateForLog(sanitizeForLog(string(modelPayload)), 400)),
+			)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "model returned invalid JSON"})
 			return
 		}
@@ -271,4 +277,18 @@ func riskLevelForScore(score int) string {
 	default:
 		return "high"
 	}
+}
+
+func truncateForLog(value string, max int) string {
+	if max <= 0 || len(value) <= max {
+		return value
+	}
+	return value[:max] + "...(truncated)"
+}
+
+func sanitizeForLog(value string) string {
+	value = strings.ReplaceAll(value, "\n", "\\n")
+	value = strings.ReplaceAll(value, "\r", "\\r")
+	value = strings.ReplaceAll(value, "\t", "\\t")
+	return value
 }
